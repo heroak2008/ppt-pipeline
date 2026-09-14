@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}模板与规范 · ppt-lite{% endblock %}
+{% block nav_design %}class="on"{% endblock %}
+{% block topbar %}
+  <h1>模板与规范</h1>
+  <div class="sp"></div>
+  <span class="muted">{{ templates|length }} 个模板候选 · {{ rows|length }} 版规范</span>
+{% endblock %}
+{% block content %}
+  <div class="panel">
+    <h3>模板候选</h3>
+    {% if not templates %}
+    <div class="empty">
+      <div class="big">暂无模板候选</div>
+      到 <a href="/slides">页面墙</a> → 页面详情 → 审核表单，勾选「模板候选」并填写 layout 区域与容量 JSON，优秀页即沉淀为可复用模板。
+    </div>
+    {% else %}
+    <div class="grid cols-4">
+      {% for t in templates %}
+      <a class="card" href="/slides/{{ t.id }}">
+        <img class="thumb" loading="lazy" src="/static/{{ t.thumb }}" onerror="this.style.display='none'">
+        <div class="meta">
+          <div class="title">#{{ t.no }} {{ t.title or '（无标题）' }}</div>
+          {% if t.template_json %}<div class="sub" style="font-family:monospace">{{ t.template_json[:70] }}</div>{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>设计规范（design system）</h3>
+    {% if not rows %}
+    <div class="empty">
+      <div class="big">暂无规范</div>
+      导入一个<b>规范类</b>（category=spec）的 PPT：解析完成后自动生成草稿（主题色 / 字号 / 页脚等规则聚合），人工编辑确认后发布版本。
+    </div>
+    {% else %}
+      {% for d in rows %}
+      <div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <b>v{{ d.version }}</b>
+          <span class="badge {{ d.status }}">{{ d.status }}</span>
+          <span class="muted">来源文件 {{ d.source_file_id or '—' }} · extraction {{ d.source_extraction_id or '—' }}{% if d.confirmed_by %} · 确认人 {{ d.confirmed_by }}{% endif %}</span>
+        </div>
+        <pre class="code">{{ d.json }}</pre>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+{% endblock %}

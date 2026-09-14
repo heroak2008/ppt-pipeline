@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}文件 · ppt-lite{% endblock %}
+{% block nav_files %}class="on"{% endblock %}
+{% block topbar %}
+  <h1>文件库</h1>
+  <div class="sp"></div>
+  <span class="muted">{{ files|length }} 个文件</span>
+{% endblock %}
+{% block content %}
+  {% if not soffice %}
+  <div class="note-warn">⚠ 未检测到 LibreOffice：旧 .ppt 转换与页面预览渲染降级（数据与检索不受影响）。可设置 <code>PPT_LITE_SOFFICE</code> 指向 soffice.exe。</div>
+  {% endif %}
+
+  <div class="panel">
+    <form action="/api/upload" method="post" enctype="multipart/form-data" id="up" class="row">
+      <input type="file" name="file" accept=".pptx,.ppt" required>
+      <select name="category">
+        <option value="material">素材</option><option value="spec">规范</option><option value="sample">范例</option>
+      </select>
+      <button type="submit" class="btn primary" id="upbtn">上传</button>
+      <span id="upstatus" class="muted"></span>
+    </form>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="panel" style="padding:0;overflow:hidden">
+    <table class="tbl" id="ftable">
+      <thead><tr>
+        <th style="width:56px">ID</th><th>名称</th><th style="width:90px">类别</th>
+        <th style="width:130px">状态</th><th style="width:80px">生效页数</th>
+        <th style="width:240px">错误</th><th style="width:150px">操作</th>
+      </tr></thead>
+      <tbody>
+      {% for f in files %}
+      <tr data-fid="{{ f.id }}">
+        <td class="num c-id">{{ f.id }}</td>
+        <td class="fname c-name">{{ f.name }}</td>
+        <td class="c-cat"><span class="pill">{{ {'material':'素材','spec':'规范','sample':'范例'}.get(f.category, f.category) }}</span></td>
+        <td class="c-status"><span class="badge {{ f.status }}">{{ f.status }}</span>
+          {% if f.status=='failed' and f.has_done %}<span class="badge reference" title="重跑失败，仍展示旧数据">旧数据生效</span>{% endif %}</td>
+        <td class="num c-count">{{ f.slide_count }}</td>
+        <td class="c-err errtxt" title="{{ f.error or '' }}">{{ f.error or '' }}</td>
+        <td>
+          <button class="btn sm" onclick="action('/api/files/{{ f.id }}/reprocess', this)">重跑</button>
+          <button class="btn sm danger" onclick="action('/api/files/{{ f.id }}/delete', this)">删除</button>
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not files %}<tr><td colspan="7"><div class="empty" style="border:0;box-shadow:none">
+        <div class="big">还没有文件</div>上传素材 / 规范 / 范例 PPT 开始构建资产库
+      </div></td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+<script>
+const CAT = new URLSearchParams(location.search).get('category') || '';
+const CAT_NAME = {'material':'素材','spec':'规范','sample':'范例'};
+
+document.getElementById('up').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const btn = document.getElementById('upbtn'); btn.disabled = true;
+  const st = document.getElementById('upstatus');
+  st.textContent = '上传中…'; setBar(35);
+  try {
+    const r = await fetch('/api/upload', {method:'POST', body: fd});
+    const {ok, j, txt} = await parseResp(r);
+    if (ok) {
+      flashBar(); toast((j && j.message) || '上传成功，已入队处理', true);
+      st.textContent = '已入队，处理中…';
+      setTimeout(()=>st.textContent='', 2000);
+      await refreshTable();
+    } else {
+      flashBar(); st.textContent=''; toast('上传失败：' + ((j && j.detail) || txt.slice(0,120)), false);
+    }
+  } catch (err) { flashBar(); st.textContent=''; toast('上传异常：' + err, false); }
+  btn.disabled = false;
+};
+
+async function action(url, btn) {
+  btn.disabled = true;
+  const r = await fetch(url, {method:'POST'});
+  const {ok, j} = await parseResp(r);
+  toast(ok ? '已执行' : ('失败：' + ((j && j.detail) || r.status)), ok);
+  await refreshTable();
+  btn.disabled = false;
+}
+
+let timer = null;
+async function refreshTable() {
+  let rows;
+  try {
+    const r = await fetch('/api/files/status' + (CAT ? '?category=' + encodeURIComponent(CAT) : ''));
+    if (!r.ok) return;
+    rows = (await r.json()).files;
+  } catch (_) { return; }
+  const tbody = document.querySelector('#ftable tbody');
+  const seen = new Set();
+  for (const f of rows) {
+    seen.add(String(f.id));
+    let tr = tbody.querySelector(`tr[data-fid="${f.id}"]`);
+    if (!tr) { fullReload(); return; }
+    tr.querySelector('.c-status').innerHTML =
+      `<span class="badge ${f.status}">${f.status}</span>` +
+      (f.status==='failed' && f.has_done ? ' <span class="badge reference">旧数据生效</span>' : '');
+    tr.querySelector('.c-count').textContent = f.slide_count;
+    const e = tr.querySelector('.c-err'); e.textContent = f.error || ''; e.title = f.error || '';
+  }
+  for (const tr of tbody.querySelectorAll('tr[data-fid]')) {
+    if (!seen.has(tr.dataset.fid)) { fullReload(); return; }
+  }
+  updateStats(rows);
+  schedule(rows.some(f => f.status === 'queued' || f.status === 'working'));
+}
+function updateStats(rows) {
+  const n = {queued:0, working:0, done:0, failed:0};
+  rows.forEach(f => { if (n[f.status] !== undefined) n[f.status]++; });
+  const active = n.working + n.queued;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="v">${rows.length}</div><div class="k">文件总数</div></div>
+    <div class="stat"><div class="v" style="color:var(--ok)">${n.done}</div><div class="k">已完成</div></div>
+    <div class="stat"><div class="v" style="color:${active?'var(--info)':'var(--ink3)'}">${active}</div><div class="k">处理中 / 排队${active?' ⏳':''}</div></div>
+    <div class="stat"><div class="v" style="color:${n.failed?'var(--danger)':'var(--ink3)'}">${n.failed}</div><div class="k">失败</div></div>`;
+}
+function schedule(active) {
+  if (active && !timer) timer = setInterval(refreshTable, 2000);
+  if (!active && timer) { clearInterval(timer); timer = null; }
+}
+function fullReload() { schedule(false); location.reload(); }
+
+updateStats(document.querySelectorAll('#ftable tr[data-fid]').length
+  ? {{ files | tojson }}
+  : []);
+refreshTable();
+</script>
+{% endblock %}

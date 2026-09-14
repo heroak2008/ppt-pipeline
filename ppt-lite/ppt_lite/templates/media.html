@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}素材 · ppt-lite{% endblock %}
+{% block nav_media %}class="on"{% endblock %}
+{% block topbar %}
+  <h1>素材库</h1>
+  <div class="sp"></div>
+  <span class="muted">{{ rows|length }} 个素材 · 按被引用数排序</span>
+{% endblock %}
+{% block content %}
+  {% if not rows %}
+  <div class="empty">
+    <div class="big">素材库为空</div>
+    素材库收录 PPT 中的<b>图片资产</b>（照片 / Logo / 图标 / 截图 / 图表图片），从每页提取、按内容全局去重。<br><br>
+    当前为空的可能原因：
+    <ul style="text-align:left;display:inline-block;margin:10px auto">
+      <li>已导入的文件未包含图片（纯矢量 / 文本型 PPT——色块、线条、SmartArt 等矢量形状不属于图片素材，其结构信息见 <a href="/slides">页面墙</a> → 页面详情的形状统计）</li>
+      <li>尚未导入任何文件（到 <a href="/">文件页</a> 上传）</li>
+    </ul>
+    <br>导入含图片的 PPT 后此处自动填充。
+  </div>
+  {% else %}
+  <div class="grid cols-6">
+    {% for m in rows %}
+    <div class="card">
+      <img class="thumb" style="object-fit:contain;background:#F5F7FA" loading="lazy"
+           src="/static/{{ m.path }}" onerror="this.style.display='none'">
+      <div class="meta">
+        <div class="sub">{{ m.fmt }} · {{ m.w or '?' }}×{{ m.h or '?' }} · 被引 {{ m.ref_count }}</div>
+        <div class="sub" style="margin-top:5px">
+          <span class="badge {{ m.review_status }}">{{ m.review_status }}</span>
+        </div>
+        {% if m.rtags %}<div class="sub" style="margin-top:4px">
+          {% for t in (m.rtags|default('')|trim(',')).split(',') if t %}<span class="pill">{{ t }}</span>{% endfor %}
+        </div>{% endif %}
+        <div class="sub" style="margin-top:7px">
+          <button class="btn sm" onclick="rev('{{ m.sha256 }}','approved',this)">✓ 可用</button>
+          <button class="btn sm danger" onclick="rev('{{ m.sha256 }}','forbidden',this)">✕ 禁用</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+<script>
+async function rev(sha, status, btn) {
+  btn.disabled = true;
+  const body = new FormData(); body.set('status', status);
+  const r = await fetch('/api/media/' + sha + '/review', {method:'POST', body});
+  const {ok} = await parseResp(r);
+  if (ok) { flashBar(); location.reload(); } else { toast('保存失败', false); btn.disabled = false; }
+}
+</script>
+{% endblock %}

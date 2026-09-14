@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}页面墙 · ppt-lite{% endblock %}
+{% block nav_slides %}class="on"{% endblock %}
+{% block topbar %}
+  <h1>页面墙</h1>
+  <div class="sp"></div>
+  <form method="get" action="/slides" class="row" style="gap:8px">
+    <input type="search" name="q" value="{{ q }}" placeholder="搜索页面文本（≥3 连续中文走语义索引，其余精确匹配）" style="width:340px">
+    <input type="text" name="type" value="{{ type }}" placeholder="类型" style="width:100px">
+    <input type="text" name="tag" value="{{ tag }}" placeholder="标签" style="width:100px">
+    <button class="btn primary">搜索</button>
+  </form>
+{% endblock %}
+{% block content %}
+  {% if not rows %}
+  <div class="empty">
+    <div class="big">没有匹配的页面</div>
+    {% if q %}换个关键词试试（搜索在已解析文本 + 标签 + 类型中匹配，被标记 forbidden 的页已排除）{% else %}上传并解析文件后，这里会出现所有生效页面的缩略图墙{% endif %}
+  </div>
+  {% else %}
+  <div class="muted" style="margin-bottom:12px">{{ rows|length }} 个生效页面{% if q %} · 查询「{{ q }}」{% endif %}</div>
+  <div class="grid cols-4">
+    {% for r in rows %}
+    <a class="card" href="/slides/{{ r.id }}">
+      <img class="thumb" loading="lazy" src="/static/{{ r.thumb }}" alt=""
+           onerror="this.style.display='none'; this.insertAdjacentHTML('afterend','<div style=&quot;aspect-ratio:16/9;background:linear-gradient(135deg,#EEF1F5,#E3E8F0);display:flex;align-items:center;justify-content:center;color:#97A0B4;font-size:12px;border-bottom:1px solid #E7EAF0&quot;>无预览</div>')">
+      <div class="meta">
+        <div class="title">#{{ r.no }} {{ r.title or '（无标题）' }}</div>
+        <div class="sub"><span class="badge {{ r.review_status }}">{{ r.review_status }}</span></div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endblock %}

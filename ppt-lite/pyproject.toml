@@ -1,0 +1,38 @@
+[project]
+name = "ppt-lite"
+version = "0.1.0"
+description = "PPT 资产提取轻量系统（lite-solution v1.8）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "python-pptx>=1.0",
+    "lxml>=5.0",
+    "olefile>=0.47",
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
+    "imagehash>=4.3",
+]
+
+# 作为可安装包（提供 `ppt-lite` 启动命令）；否则 uv 视为虚拟项目不安装自身
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ppt_lite"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "pyinstaller>=6.22.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+ppt-lite = "ppt_lite.app:main"

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}ppt-lite{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231E2B4A'/><text x='16' y='22' font-size='15' text-anchor='middle' fill='%23fff' font-family='sans-serif'>P</text></svg>">
+<style>
+:root{
+  --bg:#F2F4F8; --panel:#fff; --ink:#1A2233; --ink2:#5A6478; --ink3:#97A0B4;
+  --line:#E7EAF0; --line2:#D8DDE8;
+  --brand:#4C6FFF; --brand-soft:#EEF1FF; --brand-ink:#2B45B8;
+  --ok:#22A06B; --ok-soft:#E3F6ED;
+  --warn:#C68A00; --warn-soft:#FBF1D6;
+  --danger:#D5483C; --danger-soft:#FCEAE8;
+  --info:#2F6FED; --info-soft:#E8F0FE;
+  --pending:#7A839B; --pending-soft:#EEF0F5;
+  --sidebar:#1E2B4A; --sidebar-ink:#9FB0D1; --sidebar-on:#fff;
+  --shadow:0 1px 2px rgba(26,34,51,.05),0 4px 14px rgba(26,34,51,.06);
+  --shadow-lg:0 6px 24px rgba(26,34,51,.10);
+  --radius:12px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:14px;line-height:1.6}
+a{color:var(--brand);text-decoration:none}
+a:hover{color:var(--brand-ink)}
+
+/* ── 布局 ── */
+.app{display:flex;min-height:100vh}
+.sidebar{width:216px;background:var(--sidebar);color:var(--sidebar-ink);position:fixed;top:0;bottom:0;left:0;display:flex;flex-direction:column;z-index:50}
+.brand{padding:20px 20px 16px;color:var(--sidebar-on);font-size:17px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:10px}
+.brand .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#4C6FFF,#7A5CFF);display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;flex-shrink:0}
+.nav{flex:1;padding:6px 12px;display:flex;flex-direction:column;gap:2px}
+.nav a{color:var(--sidebar-ink);padding:9px 12px;border-radius:8px;display:flex;align-items:center;gap:10px;font-size:13.5px;transition:all .15s}
+.nav a:hover{background:rgba(255,255,255,.07);color:var(--sidebar-on)}
+.nav a.on{background:rgba(255,255,255,.12);color:var(--sidebar-on);font-weight:600}
+.nav .ico{width:16px;text-align:center;flex-shrink:0}
+.nav-cnt{margin-left:auto;background:rgba(255,255,255,.14);border-radius:9px;padding:0 7px;font-size:11px;line-height:18px;color:var(--sidebar-on)}
+.side-foot{padding:14px 20px;font-size:11.5px;color:#6B7BA0;border-top:1px solid rgba(255,255,255,.08);line-height:1.5}
+.content{flex:1;margin-left:216px;min-width:0}
+.topbar{background:var(--panel);border-bottom:1px solid var(--line);padding:0 28px;height:60px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:40}
+.topbar h1{font-size:17px;margin:0;font-weight:700}
+.topbar .sp{flex:1}
+.wrap{padding:24px 28px;max-width:1400px}
+
+/* ── 面板/卡片 ── */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:18px}
+.panel h3{margin:0 0 12px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;transition:box-shadow .18s,transform .18s,border-color .18s}
+.card:hover{box-shadow:var(--shadow-lg);transform:translateY(-2px);border-color:var(--line2)}
+.card .thumb{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#EDF0F5;border-bottom:1px solid var(--line)}
+.card .meta{padding:10px 12px}
+.card .title{font-size:13px;font-weight:600;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:2.5em}
+.card .sub{font-size:11.5px;color:var(--ink3);margin-top:4px;display:flex;gap:8px;align-items:center}
+.grid{display:grid;gap:16px}
+.grid.cols-4{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.grid.cols-6{grid-template-columns:repeat(auto-fill,minmax(168px,1fr))}
+
+/* ── 徽标 ── */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;line-height:1.5}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.queued{background:var(--pending-soft);color:var(--pending)}
+.badge.working{background:var(--info-soft);color:var(--info)}
+.badge.working::before{animation:blink 1.1s ease-in-out infinite}
+.badge.done,.badge.approved{background:var(--ok-soft);color:var(--ok)}
+.badge.failed,.badge.forbidden{background:var(--danger-soft);color:var(--danger)}
+.badge.pending{background:var(--pending-soft);color:var(--pending)}
+.badge.reference{background:var(--warn-soft);color:var(--warn)}
+.badge.draft{background:var(--warn-soft);color:var(--warn)}
+.badge.confirmed{background:var(--ok-soft);color:var(--ok)}
+.badge.idle{background:var(--pending-soft);color:var(--ink3)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── 统计片 ── */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px}
+.stat .v{font-size:24px;font-weight:800;line-height:1.2}
+.stat .k{font-size:12px;color:var(--ink2);margin-top:2px}
+
+/* ── 按钮/表单 ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--line2);background:var(--panel);color:var(--ink);font-size:13px;cursor:pointer;transition:all .15s;font-weight:500}
+.btn:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-soft)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.primary:hover{background:var(--brand-ink);color:#fff}
+.btn.danger:hover{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
+.btn.sm{padding:4px 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default;pointer-events:none}
+input[type=text],input[type=number],input[type=search],select,textarea{padding:7px 11px;border:1px solid var(--line2);border-radius:8px;font-size:13px;background:var(--panel);color:var(--ink);outline:none;transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+input[type=file]{font-size:13px}
+input[type=file]::file-selector-button{padding:6px 13px;border:1px solid var(--line2);border-radius:7px;background:var(--panel);cursor:pointer;margin-right:10px;font-size:13px}
+input[type=file]::file-selector-button:hover{border-color:var(--brand);color:var(--brand)}
+form.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+/* ── 表格 ── */
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;padding:10px 14px;font-size:12px;color:var(--ink2);font-weight:600;border-bottom:1px solid var(--line);background:#F8FAFC}
+.tbl td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:#F8FAFC}
+.tbl .num{color:var(--ink2);font-variant-numeric:tabular-nums}
+.fname{font-weight:600;color:var(--ink)}
+.errtxt{color:var(--danger);font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── toast / 进度 ── */
+#toast{position:fixed;top:18px;right:18px;background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13.5px;box-shadow:var(--shadow-lg);display:none;z-index:99;max-width:420px}
+#toast.ok{background:var(--ok)}#toast.err{background:var(--danger)}
+#progress{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--brand),#7A5CFF);width:0;transition:width .3s;z-index:98}
+
+/* ── 其他 ── */
+.note-warn{background:var(--warn-soft);border:1px solid #EBD699;color:#7A5B00;padding:10px 14px;border-radius:10px;margin-bottom:16px;font-size:13px}
+.note-info{background:var(--info-soft);border:1px solid #C9D9F8;color:#1B4FA0;padding:10px 14px;border-radius:10px;margin-bottom:16px;font-size:13px}
+.empty{background:var(--panel);border:1px dashed var(--line2);border-radius:var(--radius);padding:40px 30px;text-align:center;color:var(--ink2);line-height:1.9}
+.empty .big{font-size:15px;font-weight:600;color:var(--ink);margin-bottom:6px}
+pre.code{white-space:pre-wrap;font-size:12px;background:#F7F9FC;border:1px solid var(--line);padding:10px 12px;border-radius:8px;max-height:280px;overflow:auto;color:var(--ink2)}
+details summary{cursor:pointer;font-size:12.5px;color:var(--ink2);margin:6px 0}
+.muted{color:var(--ink3);font-size:12px}
+.pill{display:inline-block;background:var(--brand-soft);color:var(--brand-ink);border-radius:999px;padding:1px 8px;font-size:11.5px;margin:1px}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#CBD2DE;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div id="toast"></div>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">P</span>ppt-lite</div>
+    <nav class="nav">
+      <a href="/" {% block nav_files %}{% endblock %}><span class="ico">▤</span>文件</a>
+      <a href="/slides" {% block nav_slides %}{% endblock %}><span class="ico">▦</span>页面墙</a>
+      <a href="/media" {% block nav_media %}{% endblock %}><span class="ico">◈</span>素材</a>
+      <a href="/design" {% block nav_design %}{% endblock %}><span class="ico">◎</span>模板与规范</a>
+    </nav>
+    <div class="side-foot">{{ footer_info | default('') | safe }}</div>
+  </aside>
+  <div class="content">
+    <div class="topbar">{% block topbar %}{% endblock %}</div>
+    <div class="wrap">{% block content %}{% endblock %}</div>
+  </div>
+</div>
+<script>
+const toast = (msg, ok=true) => {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = ok ? 'ok' : 'err';
+  t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(()=>t.style.display='none', 4200);
+};
+const setBar = pct => document.getElementById('progress').style.width = pct + '%';
+const flashBar = () => { setBar(100); setTimeout(()=>setBar(0), 500); };
+const parseResp = async r => { const txt = await r.text(); let j=null; try{j=JSON.parse(txt)}catch(_){}; return {ok:r.ok, j, txt}; };
+</script>
+</body>
+</html>

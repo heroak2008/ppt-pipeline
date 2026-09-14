@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}页面 {{ s.no }} · ppt-lite{% endblock %}
+{% block nav_slides %}class="on"{% endblock %}
+{% block topbar %}
+  <h1>{{ fname }} <span class="muted">/ 第 {{ s.no }} 页</span></h1>
+  <div class="sp"></div>
+  <a class="btn" href="/slides">← 返回页面墙</a>
+{% endblock %}
+{% block content %}
+  {% if banner %}<div class="note-warn">⚠ {{ banner }}</div>{% endif %}
+  <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start">
+    <div>
+      <div class="panel" style="padding:12px">
+        <img src="/static/{{ s.png }}" style="width:100%;border-radius:8px;display:block;background:#EDF0F5"
+             alt="页面预览" onerror="this.style.display='none'; this.insertAdjacentHTML('afterend','<div style=&quot;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;background:#EDF0F5;border-radius:8px;color:#97A0B4&quot;>无预览（渲染降级）</div>')">
+      </div>
+      <div class="panel">
+        <h3>提取文本</h3>
+        <pre class="code">{% for t in texts %}{{ t.text }}
+{% endfor %}</pre>
+      </div>
+      <div class="panel">
+        <h3>媒体引用 <span class="muted">（{{ refs|length }}）</span></h3>
+        {% if refs %}
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          {% for r in refs %}
+          <div style="width:120px;border:1px solid var(--line);border-radius:8px;overflow:hidden;text-align:center">
+            <img src="/static/{{ r.path }}" style="width:100%;height:74px;object-fit:contain;background:#F5F7FA" onerror="this.style.display='none'">
+            <div style="padding:5px 6px;font-size:11px;color:var(--ink2)">{{ r.fmt }} · {{ r.role }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}<div class="muted">本页无图片素材</div>{% endif %}
+      </div>
+      {% if struct.warnings %}<div class="panel"><h3>解析告警</h3>
+        <ul style="margin:0;padding-left:18px;color:var(--warn);font-size:13px">
+        {% for w in struct.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
+    </div>
+    <div>
+      <div class="panel">
+        <h3>审核</h3>
+        <form id="rev">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label class="muted">状态</label>
+              <select name="status" style="width:100%">
+                {% for st in ['pending','approved','reference','forbidden'] %}
+                <option value="{{ st }}" {% if review and review.status==st %}selected{% endif %}>{{ st }}</option>
+                {% endfor %}
+              </select></div>
+            <div><label class="muted">质量（1–5）</label>
+              <input type="number" name="quality" min="1" max="5" value="{{ review.quality if review and review.quality else '' }}" style="width:100%"></div>
+          </div>
+          <label class="muted" style="margin-top:8px;display:block">页面类型</label>
+          <input type="text" name="slide_type" value="{{ review.slide_type if review else '' }}" placeholder="cover / roadmap / three-pillars …" style="width:100%">
+          <label class="muted" style="margin-top:8px;display:block">标签（逗号分隔）</label>
+          <input type="text" name="tags" value="{{ (review.tags|default('',true)|trim(',')) if review else '' }}" style="width:100%">
+          <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" name="is_template" value="1" {% if review and review.is_template %}checked{% endif %}> 模板候选
+          </label>
+          <label class="muted" style="margin-top:8px;display:block">容量 JSON（模板候选时填）</label>
+          <textarea name="template_json" rows="3" style="width:100%" placeholder='{"title_max_chars": 26}'>{{ review.template_json if review else '' }}</textarea>
+          <label class="muted" style="margin-top:8px;display:block">备注</label>
+          <input type="text" name="note" value="{{ review.note if review else '' }}" style="width:100%">
+          <button class="btn primary" style="margin-top:12px;width:100%">保存审核</button>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>形状统计</h3>
+        <table class="tbl" style="font-size:13px">
+          <tr><td>本页矢量形状</td><td class="num">{{ page_shapes|length }}</td></tr>
+          <tr><td>本页文本框</td><td class="num">{{ texts|length }}</td></tr>
+          <tr><td>本页表格</td><td class="num">{{ (struct.struct or {}).get('tables', []) | length }}</td></tr>
+          {% if (struct.struct or {}).get('has_smartart') %}<tr><td>本页 SmartArt</td><td class="num">{{ struct.struct.has_smartart }}</td></tr>{% endif %}
+          {% if (struct.struct or {}).get('has_chart') %}<tr><td>本页图表</td><td class="num">{{ struct.struct.has_chart }}</td></tr>{% endif %}
+          {% if (struct.struct or {}).get('has_ole') %}<tr><td>本页 OLE 对象</td><td class="num">{{ struct.struct.has_ole }}</td></tr>{% endif %}
+          <tr><td colspan="2" class="muted" style="border-top:1px solid var(--line)">本文件</td></tr>
+          <tr><td>页数</td><td class="num">{{ file_stats.slides }}</td></tr>
+          <tr><td>矢量形状合计</td><td class="num">{{ file_stats.shapes }}</td></tr>
+          <tr><td>文本框合计</td><td class="num">{{ file_stats.textboxes }}</td></tr>
+          <tr><td>表格合计</td><td class="num">{{ file_stats.tables }}</td></tr>
+          {% if file_stats.smartart %}<tr><td>SmartArt 合计</td><td class="num">{{ file_stats.smartart }}</td></tr>{% endif %}
+          {% if file_stats.charts %}<tr><td>图表合计</td><td class="num">{{ file_stats.charts }}</td></tr>{% endif %}
+          {% if file_stats.ole %}<tr><td>OLE 合计</td><td class="num">{{ file_stats.ole }}</td></tr>{% endif %}
+        </table>
+      </div>
+      {% if page_shapes %}
+      <div class="panel">
+        <h3>布局示意 <span class="muted">（按形状坐标渲染）</span></h3>
+        <div id="layout-map" style="border:1px solid var(--line);border-radius:8px;background:#FAFBFD;position:relative;overflow:hidden"></div>
+        <details><summary>形状明细（{{ page_shapes|length }} 项：类型 / 坐标 / 填充）</summary>
+          <pre class="code">{% for e in page_shapes %}{{ e.type }} {{ e.name }} x={{ e.x }} y={{ e.y }} w={{ e.w }} h={{ e.h }}{% if e.fill %} fill={{ e.fill }}{% endif %}{% if e.rot %} rot={{ e.rot }}{% endif %}
+{% endfor %}</pre>
+        </details>
+        <div class="muted" style="margin-top:6px">蓝底=文本框；实色=填充形状（取形状填充色）。悬停看名称。勾选"模板候选"时可用此图对照填写 layout 区域。</div>
+      </div>
+      {% endif %}
+      <div class="panel">
+        <h3>struct 摘要</h3>
+        <pre class="code">{{ struct.struct if struct.struct else '{}' }}</pre>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+<script>
+document.getElementById('rev').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = new FormData(f);
+  body.set('is_template', f.is_template.checked);
+  const r = await fetch('/api/slides/{{ s.id }}/review', {method:'POST', body});
+  const {ok} = await parseResp(r);
+  toast(ok ? '已保存' : '保存失败', ok);
+  if (ok) flashBar();
+};
+{% if page_shapes %}
+(function () {
+  const shapes = {{ page_shapes | tojson }};
+  const PW = {{ page_w }}, PH = {{ page_h }};
+  const box = document.getElementById('layout-map');
+  box.style.aspectRatio = PW + '/' + PH;
+  for (const e of shapes) {
+    if (e.x == null || e.w == null || e.w <= 0 || e.h <= 0) continue;
+    const d = document.createElement('div');
+    d.style.cssText = `position:absolute;left:${e.x/PW*100}%;top:${e.y/PH*100}%;` +
+      `width:${Math.min(e.w/PW*100,100)}%;height:${Math.min(e.h/PH*100,100)}%;` +
+      `border:1px solid rgba(31,58,95,.3);border-radius:2px;`;
+    if (e.fill && e.fill.startsWith('#')) { d.style.background = e.fill + '55'; d.style.borderColor = e.fill; }
+    else d.style.background = 'rgba(31,58,95,.06)';
+    if (e.type === 'TEXT_BOX') d.style.background = 'rgba(47,111,237,.08)';
+    d.title = e.name + ' · ' + e.type + (e.fill ? ' · ' + e.fill : '');
+    box.appendChild(d);
+  }
+})();
+{% endif %}
+</script>

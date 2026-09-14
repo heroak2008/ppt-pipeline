@@ -1,0 +1,4 @@
+# 国内网络：镜像加速（放仓库外或提交前按需调整）
+[[index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
