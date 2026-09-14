@@ -14,8 +14,8 @@ import pypdfium2 as pdfium
 log = logging.getLogger("pptlite.render")
 
 
-def convert_to_pdf(pptx_path: Path, out_dir: Path, soffice: str, timeout_sec: int) -> Path | None:
-    """LO 整文件转 PDF（锁外）。返回 PDF 路径；超时/失败返回 None（记 render_error 降级）。"""
+def convert_to_pdf(pptx_path: Path, out_dir: Path, soffice: str, timeout_sec: int) -> tuple[Path | None, str | None]:
+    """LO 整文件转 PDF（锁外）。返回 (PDF 路径, 失败原因)；失败时原因含 rc/stderr。"""
     out_dir.mkdir(parents=True, exist_ok=True)
     profile = Path(tempfile.gettempdir()) / f"pptlite-lo-{uuid.uuid4().hex}"
     cmd = [
@@ -25,22 +25,28 @@ def convert_to_pdf(pptx_path: Path, out_dir: Path, soffice: str, timeout_sec: in
     ]
     creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, creationflags=creationflags)
         try:
-            proc.wait(timeout=timeout_sec)
+            out, err = proc.communicate(timeout=timeout_sec)
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
             log.warning("LO 转换超时（%ss）: %s", timeout_sec, pptx_path.name)
-            return None
+            return None, f"LO 转换超时（>{timeout_sec}s）"
         pdf = out_dir / (pptx_path.stem + ".pdf")
         if proc.returncode != 0 or not pdf.exists():
-            log.warning("LO 转换失败 rc=%s: %s", proc.returncode, pptx_path.name)
-            return None
-        return pdf
-    except Exception:  # noqa: BLE001
+            stderr_tail = (err or b"").decode("utf-8", "replace")[-400:].strip()
+            reason = f"LO 转换失败 rc={proc.returncode}" + (f"：{stderr_tail}" if stderr_tail else "（无 stderr 输出）")
+            log.warning("%s: %s", reason, pptx_path.name)
+            return None, reason
+        return pdf, None
+    except FileNotFoundError:
+        reason = f"soffice 路径不存在: {soffice}"
+        log.warning(reason)
+        return None, reason
+    except Exception as e:  # noqa: BLE001
         log.exception("LO 调用异常: %s", pptx_path.name)
-        return None
+        return None, f"LO 调用异常: {e!r}"
     finally:
         try:
             if profile.exists():

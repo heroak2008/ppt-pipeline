@@ -453,6 +453,7 @@ ExtractedDocument v1:
   media[{sha256, fmt, w, h, path, preview, phash}]
   occurrences[{slide_no, media_sha256, role}]
   design{theme_colors, theme_fonts, page_size, common_rules}   # spec 类由 design_draft.py 消费
+  #   theme_colors/theme_fonts：主题声明；font_usage/fill_usage：run 级字体与形状填充实采（规范草稿数据源）
   render_error?                         # 文档级渲染失败
 ```
 

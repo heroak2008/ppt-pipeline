@@ -9,9 +9,19 @@ from pathlib import Path
 
 
 def _find_soffice() -> str | None:
+    """查找顺序：PPT_LITE_SOFFICE 环境变量 → 安装器写入的配置文件 → PATH → 常见路径。"""
     env = os.environ.get("PPT_LITE_SOFFICE")
     if env:
         return env if Path(env).exists() else None
+    # 安装器选择页写入的配置文件（%LOCALAPPDATA%\ppt-lite\soffice.txt）
+    cfg_file = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "ppt-lite" / "soffice.txt"
+    try:
+        if cfg_file.exists():
+            p = cfg_file.read_text(encoding="utf-8").strip()
+            if p and Path(p).exists():
+                return p
+    except Exception:  # noqa: BLE001
+        pass
     p = shutil.which("soffice") or shutil.which("soffice.exe")
     if p:
         return p
@@ -50,9 +60,12 @@ class Config:
     max_unzip_total_bytes: int = 2 * 1024 * 1024 * 1024
     max_media_bytes: int = 512 * 1024 * 1024
 
-    # LO
+    # LO：超时按页数+文件规模动态计算（§4.x）
     soffice: str | None = field(default_factory=_find_soffice)
-    lo_timeout_sec: int = 180
+    lo_timeout_base_sec: int = 60          # 基础开销（LO 冷启动 + 字体缓存）
+    lo_timeout_per_page_sec: int = 8       # 每页渲染开销
+    lo_timeout_per_mb_sec: int = 10        # 每 MB 文件大小开销
+    lo_timeout_max_sec: int = 1800         # 上限防失控
 
     # 渲染
     slide_png_width: int = 1600
@@ -107,3 +120,10 @@ class Config:
         for d in (self.raw_dir, self.derived_dir, self.media_dir, self.tmp_dir,
                   self.previews_dir, self.staging_dir, self.trash_dir):
             d.mkdir(parents=True, exist_ok=True)
+
+    def lo_timeout(self, *, pages: int = 0, size_bytes: int = 0) -> int:
+        """LO 转换超时：base + 页数×每页开销 + 文件大小×每 MB 开销，封顶。"""
+        size_mb = size_bytes / (1024 * 1024)
+        t = self.lo_timeout_base_sec + pages * self.lo_timeout_per_page_sec \
+            + int(size_mb * self.lo_timeout_per_mb_sec)
+        return min(t, self.lo_timeout_max_sec)

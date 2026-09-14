@@ -38,15 +38,60 @@
     </div>
     {% else %}
       {% for d in rows %}
-      <div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+      <div data-did="{{ d.id }}" style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
           <b>v{{ d.version }}</b>
           <span class="badge {{ d.status }}">{{ d.status }}</span>
           <span class="muted">来源文件 {{ d.source_file_id or '—' }} · extraction {{ d.source_extraction_id or '—' }}{% if d.confirmed_by %} · 确认人 {{ d.confirmed_by }}{% endif %}</span>
+          <span style="margin-left:auto;display:flex;gap:8px">
+            {% if d.status == 'draft' %}
+            <button class="btn sm" onclick="editDraft({{ d.id }})">编辑</button>
+            <button class="btn sm primary" onclick="confirmDraft({{ d.id }})">确认版本</button>
+            {% endif %}
+            <a class="btn sm" href="/api/design/{{ d.id }}/export" download>导出 JSON</a>
+          </span>
         </div>
         <pre class="code">{{ d.json }}</pre>
+        {% if d.payload and d.payload.rule_candidates %}
+        <details open>
+          <summary>规则候选条款（{{ d.payload.rule_candidates|length }} 条 · 来自规范 PPT 的文字描述，逐条人工审）</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          {% for c in d.payload.rule_candidates %}
+            <div style="border-left:3px solid var(--brand);background:#F8FAFC;padding:8px 12px;border-radius:0 8px 8px 0;font-size:13px">
+              <div style="display:flex;gap:8px;align-items:baseline">
+                {% if c.slide_id %}<a class="pill" href="/slides/{{ c.slide_id }}">示例页 {{ c.page }}</a>
+                {% else %}<span class="pill">第 {{ c.page }} 页</span>{% endif %}
+                <span class="muted" style="font-size:11px">adopted: {{ c.adopted if c.adopted is not none else '未审' }}</span>
+              </div>
+              <div style="white-space:pre-wrap;margin-top:4px">{{ c.text }}</div>
+            </div>
+          {% endfor %}
+          </div>
+          <div class="muted" style="margin-top:6px">点击「编辑」在 JSON 中把每条 adopted 改为 true/false，并改写成正式规则语句；示例页链接可跳转核对样式。</div>
+        </details>
+        {% endif %}
       </div>
       {% endfor %}
     {% endif %}
   </div>
+<script>
+async function confirmDraft(id) {
+  const body = new FormData(); body.set('confirmed_by', '');
+  const r = await fetch('/api/design/' + id + '/confirm', {method:'POST', body});
+  const {ok, j} = await parseResp(r);
+  if (ok) { flashBar(); toast('已确认为正式版本'); location.reload(); }
+  else toast('确认失败：' + ((j && j.detail) || r.status), false);
+}
+async function editDraft(id) {
+  const pre = document.querySelector(`[data-did="${id}"] pre.code`);
+  const current = pre.textContent;
+  const edited = prompt('编辑草稿 JSON（保存前会校验语法）：', current);
+  if (edited === null) return;
+  const body = new FormData(); body.set('payload', edited);
+  const r = await fetch('/api/design/' + id + '/update', {method:'POST', body});
+  const {ok, j} = await parseResp(r);
+  if (ok) { flashBar(); toast('已保存'); location.reload(); }
+  else toast('保存失败：' + ((j && j.detail) || r.status), false);
+}
+</script>
 {% endblock %}

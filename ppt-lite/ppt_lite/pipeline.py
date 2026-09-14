@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import zipfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -93,6 +94,7 @@ def extract_document(cfg: Config, ex_id: int, src_path: Path, category: str,
         prs = Presentation(str(src_path))
         doc.design["page_size"] = {"width_emu": prs.slide_width, "height_emu": prs.slide_height}
         slide_media_map: dict[int, list[tuple[str, str]]] = {}   # slide_no -> [(part, role)]
+        font_counter: Counter = Counter()                        # (字体, 字号pt, bold) -> 次数
 
         for idx, slide in enumerate(prs.slides, start=1):
             s: dict = {"no": idx, "title": None, "texts": [], "struct": {}, "notes": None,
@@ -103,7 +105,7 @@ def extract_document(cfg: Config, ex_id: int, src_path: Path, category: str,
                 if slide.has_notes_slide and slide.notes_slide.notes_text_frame is not None:
                     s["notes"] = slide.notes_slide.notes_text_frame.text
                 for shp in slide.shapes:
-                    _walk_shape(shp, s, texts_parts, slide_media_map, idx)
+                    _walk_shape(shp, s, texts_parts, slide_media_map, idx, font_counter)
             except Exception as e:  # noqa: BLE001 — 页级失败记 warnings，不中断（§4.3）
                 s["warnings"].append(f"页解析异常: {e!r}")
             s["title"] = s["title"] or (texts_parts[0][:80] if texts_parts else None)
@@ -115,6 +117,19 @@ def extract_document(cfg: Config, ex_id: int, src_path: Path, category: str,
                 m = media_by_part.get(part)
                 if m:
                     doc.occurrences.append({"slide_no": no, "media_sha256": m["sha256"], "role": role})
+
+        # ── 实采字体统计（run 级）与形状填充色直方图 → 规范草稿数据源 ──
+        doc.design["font_usage"] = [
+            {"font": f, "size_pt": sz, "bold": b, "count": n}
+            for (f, sz, b), n in font_counter.most_common(30) if f or sz
+        ]
+        color_counter: Counter = Counter()
+        for sl in doc.slides:
+            for e in (sl.get("struct", {}).get("shapes") or []):
+                fill = e.get("fill")
+                if fill and fill.startswith("#"):
+                    color_counter[fill] += 1
+        doc.design["fill_usage"] = [{"rgb": c, "count": n} for c, n in color_counter.most_common(20)]
     except Exception as e:  # noqa: BLE001 — 文档级解析失败
         doc.warnings.append(f"python-pptx 解析失败: {e!r}")
 
@@ -124,9 +139,13 @@ def extract_document(cfg: Config, ex_id: int, src_path: Path, category: str,
             if not cfg.soffice:
                 doc.render_error = "LibreOffice 未配置，跳过渲染（预览不可用，数据完整）"
             else:
-                pdf = convert_to_pdf(src_path, work / "pdf", cfg.soffice, cfg.lo_timeout_sec)
+                # 超时按页数 + 文件大小动态计算（页数在解析后已知）
+                timeout = cfg.lo_timeout(pages=len(doc.slides), size_bytes=src_path.stat().st_size)
+                log.info("LO 渲染超时窗口: %ss（%d 页 / %.1fMB）",
+                         timeout, len(doc.slides), src_path.stat().st_size / 1048576)
+                pdf, render_reason = convert_to_pdf(src_path, work / "pdf", cfg.soffice, timeout)
                 if pdf is None:
-                    doc.render_error = "LO 转换失败/超时（数据完整，预览不可用）"
+                    doc.render_error = render_reason or "LO 转换失败（原因未知）"
                 else:
                     render_pdf_pages(pdf, work / "preview" / "slides", work / "preview" / "thumbs",
                                      cfg.slide_png_width, cfg.thumb_width)
@@ -156,7 +175,8 @@ def _stage_media(cfg: Config, staging: Path, data: bytes, ext: str) -> dict:
     return m
 
 
-def _walk_shape(shp, slide_dict: dict, texts_parts: list, slide_media_map: dict, slide_no: int) -> None:
+def _walk_shape(shp, slide_dict: dict, texts_parts: list, slide_media_map: dict, slide_no: int,
+                font_counter: Counter | None = None) -> None:
     """遍历形状（含组合递归）：全量几何采集 + 文本/占位符/媒体引用；SmartArt/OLE 记 presence。"""
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -169,7 +189,7 @@ def _walk_shape(shp, slide_dict: dict, texts_parts: list, slide_media_map: dict,
     try:
         if st == MSO_SHAPE_TYPE.GROUP:
             for sub in shp.shapes:
-                _walk_shape(sub, slide_dict, texts_parts, slide_media_map, slide_no)
+                _walk_shape(sub, slide_dict, texts_parts, slide_media_map, slide_no, font_counter)
             return
     except Exception:  # noqa: BLE001
         pass
@@ -185,6 +205,8 @@ def _walk_shape(shp, slide_dict: dict, texts_parts: list, slide_media_map: dict,
             })
             if shp.is_placeholder and slide_dict["title"] is None and _is_title_placeholder(shp):
                 slide_dict["title"] = txt
+        if font_counter is not None:
+            _collect_fonts(shp.text_frame, font_counter)
     try:
         if shp.shape_type == MSO_SHAPE_TYPE.PICTURE:
             image = shp.image
@@ -217,6 +239,20 @@ def _walk_shape(shp, slide_dict: dict, texts_parts: list, slide_media_map: dict,
             texts_parts.extend(t for row in cells for t in row if t)
         except Exception:  # noqa: BLE001
             pass
+
+
+def _collect_fonts(text_frame, font_counter: Counter) -> None:
+    """run 级字体统计：字体名 / 字号 pt / 加粗（继承主题字体的 run 记为 None 字段，由草稿层合并解释）。"""
+    try:
+        for para in text_frame.paragraphs:
+            for run in para.runs:
+                fname = run.font.name
+                size = round(run.font.size.pt, 1) if run.font.size else None
+                bold = bool(run.font.bold) if run.font.bold is not None else None
+                if fname or size:
+                    font_counter[(fname, size, bold)] += 1
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _shape_entry(shp) -> dict:

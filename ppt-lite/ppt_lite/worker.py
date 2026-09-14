@@ -1,8 +1,8 @@
 """worker.py：后台单线程（领取→处理→finalize；异常→mark_failed）。"""
 from __future__ import annotations
 
+import json
 import logging
-import shutil
 import threading
 from pathlib import Path
 
@@ -79,6 +79,11 @@ class Worker:
                             self.store.add_media_ref(sid, mid, occ["role"])
             # finalize（文件先发布→DB 后切换；幂等；LO 降级时跳过发布）
             self.store.finalize(ex_id, len(doc.slides), has_preview=doc.render_error is None)
+            # 规范数据源入库（主题色/字体/页面尺寸；design_draft 消费）
+            if doc.design:
+                with self.db.tx() as cur:
+                    cur.execute("update extraction set design_json=? where id=?",
+                                (json.dumps(doc.design, ensure_ascii=False), ex_id))
             maybe_generate(self.db, ex_id)
         except Exception as e:  # noqa: BLE001 — 任何异常 → 失败清理（旧 done 不动）
             log.exception("处理失败 ex=%s", ex_id)

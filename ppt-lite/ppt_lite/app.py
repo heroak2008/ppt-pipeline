@@ -166,8 +166,22 @@ def page_design(request: Request):
         "select s.id, s.file_id, s.no, s.title, s.thumb, sr.template_json"
         " from slide_review sr join v_active_slide s on s.file_id=sr.file_id and s.no=sr.no"
         " where sr.is_template=1 order by s.file_id, s.no")
+    parsed_rows = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["payload"] = json.loads(d["json"])
+        except Exception:  # noqa: BLE001
+            d["payload"] = None
+        # 规则候选条款关联到生效页 id（供跳转）
+        if d["payload"] and d["payload"].get("rule_candidates") and d["source_file_id"]:
+            pids = {r2["no"]: r2["id"] for r2 in db.all(
+                "select no, id from v_active_slide where file_id=?", d["source_file_id"])}
+            for c in d["payload"]["rule_candidates"]:
+                c["slide_id"] = pids.get(c["page"])
+        parsed_rows.append(d)
     return templates.TemplateResponse(request, "design.html",
-                                      {"request": request, "rows": [dict(r) for r in rows],
+                                      {"request": request, "rows": parsed_rows,
                                        "templates": [dict(t) for t in tpl_rows],
                                        "footer_info": _footer()})
 
@@ -273,9 +287,44 @@ def api_review(sid: int, status: str = Form(...), slide_type: str = Form(None),
             " status=excluded.status, slide_type=excluded.slide_type, quality=excluded.quality,"
             " tags=excluded.tags, is_template=excluded.is_template,"
             " template_json=excluded.template_json, note=excluded.note,"
-            " updated_at=datetime('now'))",
+            " updated_at=datetime('now')",
             (s["file_id"], s["no"], status, slide_type, quality, norm_tags(tags),
              1 if is_template else 0, template_json, note))
+    return {"ok": True}
+
+
+@app.post("/api/design/{did}/confirm")
+def api_design_confirm(did: int, confirmed_by: str = Form("")):
+    with db.tx() as cur:
+        cur2 = cur.execute(
+            "update design_system set status='confirmed', confirmed_by=?, confirmed_at=datetime('now')"
+            " where id=? and status='draft'", (confirmed_by or "me", did))
+        if cur2.rowcount == 0:
+            raise HTTPException(409, "该版本不是草稿（可能已确认）")
+    return {"ok": True}
+
+
+@app.get("/api/design/{did}/export")
+def api_design_export(did: int):
+    d = db.one("select version, json from design_system where id=?", did)
+    if not d:
+        raise HTTPException(404)
+    return Response(content=d["json"], media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="design-system-v{d["version"]}.json"'})
+
+
+@app.post("/api/design/{did}/update")
+def api_design_update(did: int, payload: str = Form(...)):
+    """人工编辑草稿 JSON（校验合法 JSON；仅 draft 可编辑）。"""
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"JSON 语法错误: {e}")
+    with db.tx() as cur:
+        cur2 = cur.execute("update design_system set json=? where id=? and status='draft'",
+                           (json.dumps(parsed, ensure_ascii=False, indent=2), did))
+        if cur2.rowcount == 0:
+            raise HTTPException(409, "仅草稿可编辑（已确认版本不可改）")
     return {"ok": True}
 
 
@@ -288,7 +337,7 @@ def api_media_review(sha: str, status: str = Form(...), tags: str = Form(None), 
             "insert into media_review(sha256, status, tags, note, updated_at)"
             " values(?,?,?,?,datetime('now'))"
             " on conflict(sha256) do update set status=excluded.status, tags=excluded.tags,"
-            " note=excluded.note, updated_at=datetime('now'))",
+            " note=excluded.note, updated_at=datetime('now')",
             (sha, status, norm_tags(tags), note))
     return {"ok": True}
 
@@ -319,7 +368,9 @@ def _convert_ppt_to_pptx(src: Path, staging: Path) -> Path | None:
            f"-env:UserInstallation=file:///{profile.as_posix()}",
            "--convert-to", "pptx", "--outdir", str(out), str(src)]
     try:
-        p = subprocess.run(cmd, capture_output=True, timeout=cfg.lo_timeout_sec)
+        # .ppt 转换发生在解析前（不知页数），按文件大小估算超时
+        timeout = cfg.lo_timeout(size_bytes=src.stat().st_size)
+        p = subprocess.run(cmd, capture_output=True, timeout=timeout)
         files = list(out.glob("*.pptx"))
         if p.returncode == 0 and files:
             dest = staging / "src.pptx"

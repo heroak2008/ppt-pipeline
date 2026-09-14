@@ -46,6 +46,7 @@ create table if not exists extraction (
   id integer primary key autoincrement,
   file_id integer not null references file(id) on delete cascade,
   parser_version text, renderer_version text,
+  design_json json,
   status text not null default 'queued'
               check (status in ('queued','running','done','failed')),
   started_at text, finished_at text, error text
@@ -176,6 +177,10 @@ class Database:
         conn = self.connect()
         try:
             conn.executescript(SCHEMA)   # executescript 自带事务管理
+            # 旧库迁移：extraction 补 design_json 列（幂等）
+            cols = {r[1] for r in conn.execute("pragma table_info(extraction)")}
+            if "design_json" not in cols:
+                conn.execute("alter table extraction add column design_json json")
         finally:
             conn.close()
 

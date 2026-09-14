@@ -179,7 +179,7 @@ class Store:
                 _verify_complete(staging, slide_count)
                 if target.exists():             # 上次发布后、DB 切换前崩溃的孤儿
                     to_trash(target, self.cfg.trash_dir)
-                staging.rename(target)           # 同卷原子
+                _atomic_rename(staging, target)  # 同卷原子；Windows 杀软瞬时锁 → 短退避重试
 
             # B. DB finalization（单事务）
             dead: list[DeadMedia] = []
@@ -364,6 +364,19 @@ def _dir_complete(target: Path, slide_count: int) -> bool:
 def _verify_complete(staging: Path, slide_count: int) -> None:
     if not _dir_complete(staging, slide_count):
         raise InvalidState(f"发布校验失败：staging 不完整（期望 {slide_count} 页）")
+
+
+def _atomic_rename(src: Path, dst: Path, attempts: int = 5) -> None:
+    """目录原子 rename；Windows 上杀软/索引器对新写文件有瞬时锁，短退避重试。"""
+    import time as _t
+    for i in range(attempts):
+        try:
+            src.rename(dst)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            _t.sleep(0.2 * (i + 1))
 
 
 def _j(obj) -> str:

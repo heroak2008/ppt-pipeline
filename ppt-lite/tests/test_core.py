@@ -134,7 +134,8 @@ def test_reprocess_keeps_review(env):
     drain(w)
 
     exs = db.all("select * from extraction where file_id=?", fid)
-    assert len(exs) == 1 and exs[0]["status"] == "done"   # 旧 done 级联删除，新 done 顶上
+    dones = [e for e in exs if e["status"] == "done"]
+    assert len(dones) == 1                      # 生效 done 恰好一个（首个若失败则 failed 行保留属预期）
     sr = db.one("select * from slide_review where file_id=? and no=1", fid)
     assert sr["status"] == "approved" and sr["slide_type"] == "cover"   # 人工成果保留
     assert db.one("select count(*) c from v_active_slide where file_id=?", fid)["c"] == 2
@@ -272,3 +273,49 @@ def test_tags_norm():
     from ppt_lite.db import norm_tags
     assert norm_tags("a, b ,,a，c ") == ",a,b,c,"
     assert norm_tags(None) == ","
+
+
+# ------------------------------------------------------------------ 审核端点回归（防 upsert 括号笔误）
+def test_review_endpoints(env):
+    """/api/slides/{id}/review 与 /api/media/{sha}/review 的 upsert 语法回归。"""
+    from fastapi.testclient import TestClient
+    from ppt_lite.app import app
+    cfg, db, store = env
+    # 造素材行
+    with db.tx() as cur:
+        cur.execute("insert into media(sha256, fmt, path) values('m1','png','media/m1.png')")
+    # 造文件+done+slide
+    data = make_pptx(cfg.tmp_dir / "r.pptx", 1)
+    fid = upload(cfg, store, data)
+    Worker(db, cfg)  # noqa
+    drain(Worker(db, cfg))
+    sid = db.one("select id from v_active_slide where file_id=?", fid)["id"]
+
+    c = TestClient(app)
+    r = c.post(f"/api/slides/{sid}/review",
+               data={"status": "approved", "slide_type": "cover", "tags": "战略,宣讲",
+                     "quality": 5, "is_template": "true",
+                     "template_json": '{"capacity": {"title_max_chars": 26}}'})
+    assert r.status_code == 200, r.text
+    sr = db.one("select * from slide_review where file_id=?", fid)
+    assert sr["status"] == "approved" and sr["is_template"] == 1 and sr["tags"] == ",战略,宣讲,"
+    # upsert 二次更新
+    r = c.post(f"/api/slides/{sid}/review", data={"status": "reference"})
+    assert r.status_code == 200
+
+    r = c.post("/api/media/m1/review", data={"status": "approved", "tags": "logo"})
+    assert r.status_code == 200, r.text
+    r = c.post("/api/media/m1/review", data={"status": "forbidden"})
+    assert r.status_code == 200
+    assert db.one("select status from media_review where sha256='m1'")["status"] == "forbidden"
+
+
+# ------------------------------------------------------------------ 超时自适应
+def test_lo_timeout_scaling(env):
+    cfg, _, _ = env
+    base = cfg.lo_timeout(pages=0, size_bytes=0)                      # 基础开销
+    assert base == cfg.lo_timeout_base_sec
+    t_small = cfg.lo_timeout(pages=10, size_bytes=2 * 1024 * 1024)    # 10 页 2MB
+    t_large = cfg.lo_timeout(pages=100, size_bytes=50 * 1024 * 1024)  # 100 页 50MB
+    assert t_large > t_small > base
+    assert cfg.lo_timeout(pages=10000, size_bytes=500 * 1024 * 1024) == cfg.lo_timeout_max_sec  # 封顶
