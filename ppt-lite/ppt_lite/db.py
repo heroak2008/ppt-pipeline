@@ -106,7 +106,8 @@ create table if not exists media_review (
 create table if not exists design_system (
   id integer primary key,
   version integer not null unique,
-  json text not null,
+  json text,                            -- 旧版 PPT 草稿（兼容读取；新规范走 content_md）
+  content_md text,                      -- 规范正文（markdown；skill 导入/人工编写）
   status text default 'draft' check (status in ('draft','confirmed')),
   confirmed_by text, confirmed_at text,
   source_file_id integer references file(id) on delete set null,
@@ -177,10 +178,13 @@ class Database:
         conn = self.connect()
         try:
             conn.executescript(SCHEMA)   # executescript 自带事务管理
-            # 旧库迁移：extraction 补 design_json 列（幂等）
+            # 旧库迁移：extraction 补 design_json 列、design_system 补 content_md 列（幂等）
             cols = {r[1] for r in conn.execute("pragma table_info(extraction)")}
             if "design_json" not in cols:
                 conn.execute("alter table extraction add column design_json json")
+            cols = {r[1] for r in conn.execute("pragma table_info(design_system)")}
+            if "content_md" not in cols:
+                conn.execute("alter table design_system add column content_md text")
         finally:
             conn.close()
 

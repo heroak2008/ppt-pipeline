@@ -161,27 +161,13 @@ def page_media(request: Request):
 
 @app.get("/design", response_class=HTMLResponse)
 def page_design(request: Request):
-    rows = db.all("select * from design_system order by version desc")
+    rows = [dict(r) for r in db.all("select * from design_system order by version desc")]
     tpl_rows = db.all(
         "select s.id, s.file_id, s.no, s.title, s.thumb, sr.template_json"
         " from slide_review sr join v_active_slide s on s.file_id=sr.file_id and s.no=sr.no"
         " where sr.is_template=1 order by s.file_id, s.no")
-    parsed_rows = []
-    for r in rows:
-        d = dict(r)
-        try:
-            d["payload"] = json.loads(d["json"])
-        except Exception:  # noqa: BLE001
-            d["payload"] = None
-        # 规则候选条款关联到生效页 id（供跳转）
-        if d["payload"] and d["payload"].get("rule_candidates") and d["source_file_id"]:
-            pids = {r2["no"]: r2["id"] for r2 in db.all(
-                "select no, id from v_active_slide where file_id=?", d["source_file_id"])}
-            for c in d["payload"]["rule_candidates"]:
-                c["slide_id"] = pids.get(c["page"])
-        parsed_rows.append(d)
     return templates.TemplateResponse(request, "design.html",
-                                      {"request": request, "rows": parsed_rows,
+                                      {"request": request, "rows": rows,
                                        "templates": [dict(t) for t in tpl_rows],
                                        "footer_info": _footer()})
 
@@ -304,25 +290,51 @@ def api_design_confirm(did: int, confirmed_by: str = Form("")):
     return {"ok": True}
 
 
+@app.post("/api/design/import")
+async def api_design_import(content: str = Form(""), file: UploadFile | None = File(None)):
+    """导入规范（markdown）：粘贴文本 或 上传 .md 文件 → 新 draft 版本。"""
+    md = content
+    if file is not None and file.filename:
+        raw = await file.read()
+        md = raw.decode("utf-8", "replace")
+    md = md.strip()
+    if not md:
+        raise HTTPException(422, "内容为空")
+    with db.tx() as cur:
+        v = (cur.execute("select max(version) v from design_system").fetchone()["v"] or 0) + 1
+        cur.execute("insert into design_system(version, json, content_md, status) values(?,?,?, 'draft')",
+                    (v, "{}", md))          # json 列写空对象兼容旧库 NOT NULL
+    return {"ok": True, "version": v}
+
+
 @app.get("/api/design/{did}/export")
 def api_design_export(did: int):
-    d = db.one("select version, json from design_system where id=?", did)
+    d = db.one("select version, json, content_md from design_system where id=?", did)
     if not d:
         raise HTTPException(404)
-    return Response(content=d["json"], media_type="application/json",
+    if d["content_md"]:   # markdown 承载：导出 .md
+        return Response(content=d["content_md"], media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="design-spec-v{d["version"]}.md"'})
+    return Response(content=d["json"], media_type="application/json",       # 旧版 PPT 草稿兼容
                     headers={"Content-Disposition": f'attachment; filename="design-system-v{d["version"]}.json"'})
 
 
 @app.post("/api/design/{did}/update")
-def api_design_update(did: int, payload: str = Form(...)):
-    """人工编辑草稿 JSON（校验合法 JSON；仅 draft 可编辑）。"""
-    try:
-        parsed = json.loads(payload)
-    except json.JSONDecodeError as e:
-        raise HTTPException(422, f"JSON 语法错误: {e}")
+def api_design_update(did: int, payload: str = Form(None), content: str = Form(None)):
+    """人工编辑草稿：markdown（content，新）或 JSON（payload，旧 PPT 草稿兼容）。仅 draft 可编辑。"""
     with db.tx() as cur:
-        cur2 = cur.execute("update design_system set json=? where id=? and status='draft'",
-                           (json.dumps(parsed, ensure_ascii=False, indent=2), did))
+        if content is not None:
+            if not content.strip():
+                raise HTTPException(422, "内容为空")
+            cur2 = cur.execute("update design_system set content_md=? where id=? and status='draft'",
+                               (content, did))
+        else:
+            try:
+                parsed = json.loads(payload)
+            except (json.JSONDecodeError, TypeError) as e:
+                raise HTTPException(422, f"JSON 语法错误: {e}")
+            cur2 = cur.execute("update design_system set json=? where id=? and status='draft'",
+                               (json.dumps(parsed, ensure_ascii=False, indent=2), did))
         if cur2.rowcount == 0:
             raise HTTPException(409, "仅草稿可编辑（已确认版本不可改）")
     return {"ok": True}

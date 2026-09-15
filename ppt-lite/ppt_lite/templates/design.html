@@ -30,51 +30,72 @@
   </div>
 
   <div class="panel">
-    <h3>设计规范（design system）</h3>
-    {% if not rows %}
-    <div class="empty">
-      <div class="big">暂无规范</div>
-      导入一个<b>规范类</b>（category=spec）的 PPT：解析完成后自动生成草稿（主题色 / 字号 / 页脚等规则聚合），人工编辑确认后发布版本。
+    <h3>设计规范（markdown 承载）</h3>
+    <div class="note-info" style="margin-bottom:14px">
+      规范以 <b>markdown</b> 为承载格式：由 skill/AI 将规范内容整理成 markdown 后粘贴导入（或上传 .md 文件），
+      在下方编辑器人工修订，确认后冻结为正式版本。不再从 PPT 自动提取文字。
     </div>
+
+    <form id="import-form" class="row" style="align-items:stretch;margin-bottom:18px">
+      <textarea name="content" placeholder="粘贴规范 markdown 内容…" style="flex:1;min-height:90px;font-family:Consolas,monospace"></textarea>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input type="file" id="mdfile" accept=".md,.markdown,.txt" style="font-size:12px">
+        <button class="btn primary" type="submit">导入为新草稿</button>
+      </div>
+    </form>
+
+    {% if not rows %}
+    <div class="empty"><div class="big">暂无规范</div>粘贴或上传一份 markdown 规范开始。</div>
     {% else %}
       {% for d in rows %}
-      <div data-did="{{ d.id }}" style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px">
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
           <b>v{{ d.version }}</b>
           <span class="badge {{ d.status }}">{{ d.status }}</span>
-          <span class="muted">来源文件 {{ d.source_file_id or '—' }} · extraction {{ d.source_extraction_id or '—' }}{% if d.confirmed_by %} · 确认人 {{ d.confirmed_by }}{% endif %}</span>
+          <span class="muted">{% if d.content_md %}markdown{% else %}旧版 PPT 草稿（JSON，仅存档）{% endif %}{% if d.confirmed_by %} · 确认人 {{ d.confirmed_by }}{% endif %}</span>
           <span style="margin-left:auto;display:flex;gap:8px">
             {% if d.status == 'draft' %}
-            <button class="btn sm" onclick="editDraft({{ d.id }})">编辑</button>
-            <button class="btn sm primary" onclick="confirmDraft({{ d.id }})">确认版本</button>
+            <button class="btn sm primary" onclick="saveDraft({{ d.id }})">保存编辑</button>
+            <button class="btn sm" onclick="confirmDraft({{ d.id }})">确认版本</button>
             {% endif %}
-            <a class="btn sm" href="/api/design/{{ d.id }}/export" download>导出 JSON</a>
+            <a class="btn sm" href="/api/design/{{ d.id }}/export" download>导出 {{ '.md' if d.content_md else '.json' }}</a>
           </span>
         </div>
+        {% if d.content_md is not none %}
+        <textarea id="md-{{ d.id }}" {% if d.status != 'draft' %}readonly{% endif %}
+          style="width:100%;min-height:300px;font-family:Consolas,'Courier New',monospace;font-size:13px;
+                 padding:12px;border:1px solid var(--line);border-radius:8px;line-height:1.6;
+                 background:{% if d.status != 'draft' %}#F8FAFC{% else %}#fff{% endif %}">{{ d.content_md }}</textarea>
+        {% else %}
         <pre class="code">{{ d.json }}</pre>
-        {% if d.payload and d.payload.rule_candidates %}
-        <details open>
-          <summary>规则候选条款（{{ d.payload.rule_candidates|length }} 条 · 来自规范 PPT 的文字描述，逐条人工审）</summary>
-          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
-          {% for c in d.payload.rule_candidates %}
-            <div style="border-left:3px solid var(--brand);background:#F8FAFC;padding:8px 12px;border-radius:0 8px 8px 0;font-size:13px">
-              <div style="display:flex;gap:8px;align-items:baseline">
-                {% if c.slide_id %}<a class="pill" href="/slides/{{ c.slide_id }}">示例页 {{ c.page }}</a>
-                {% else %}<span class="pill">第 {{ c.page }} 页</span>{% endif %}
-                <span class="muted" style="font-size:11px">adopted: {{ c.adopted if c.adopted is not none else '未审' }}</span>
-              </div>
-              <div style="white-space:pre-wrap;margin-top:4px">{{ c.text }}</div>
-            </div>
-          {% endfor %}
-          </div>
-          <div class="muted" style="margin-top:6px">点击「编辑」在 JSON 中把每条 adopted 改为 true/false，并改写成正式规则语句；示例页链接可跳转核对样式。</div>
-        </details>
         {% endif %}
       </div>
       {% endfor %}
     {% endif %}
   </div>
+{% endblock %}
 <script>
+document.getElementById('mdfile').onchange = async (e) => {
+  const f = e.target.files[0];
+  if (f) document.querySelector('#import-form textarea[name=content]').value = await f.text();
+};
+document.getElementById('import-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const f = document.getElementById('mdfile').files[0];
+  if (f) fd.set('file', f);
+  const r = await fetch('/api/design/import', {method:'POST', body: fd});
+  const {ok, j} = await parseResp(r);
+  if (ok) { flashBar(); toast('已导入为草稿 v' + j.version); location.reload(); }
+  else toast('导入失败：' + ((j && j.detail) || r.status), false);
+};
+async function saveDraft(id) {
+  const body = new FormData();
+  body.set('content', document.getElementById('md-' + id).value);
+  const r = await fetch('/api/design/' + id + '/update', {method:'POST', body});
+  const {ok, j} = await parseResp(r);
+  if (ok) { flashBar(); toast('已保存'); } else toast('保存失败：' + ((j && j.detail) || r.status), false);
+}
 async function confirmDraft(id) {
   const body = new FormData(); body.set('confirmed_by', '');
   const r = await fetch('/api/design/' + id + '/confirm', {method:'POST', body});
@@ -82,16 +103,4 @@ async function confirmDraft(id) {
   if (ok) { flashBar(); toast('已确认为正式版本'); location.reload(); }
   else toast('确认失败：' + ((j && j.detail) || r.status), false);
 }
-async function editDraft(id) {
-  const pre = document.querySelector(`[data-did="${id}"] pre.code`);
-  const current = pre.textContent;
-  const edited = prompt('编辑草稿 JSON（保存前会校验语法）：', current);
-  if (edited === null) return;
-  const body = new FormData(); body.set('payload', edited);
-  const r = await fetch('/api/design/' + id + '/update', {method:'POST', body});
-  const {ok, j} = await parseResp(r);
-  if (ok) { flashBar(); toast('已保存'); location.reload(); }
-  else toast('保存失败：' + ((j && j.detail) || r.status), false);
-}
 </script>
-{% endblock %}

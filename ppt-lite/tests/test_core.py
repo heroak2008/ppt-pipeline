@@ -297,7 +297,10 @@ def test_review_endpoints(env):
                      "quality": 5, "is_template": "true",
                      "template_json": '{"capacity": {"title_max_chars": 26}}'})
     assert r.status_code == 200, r.text
-    sr = db.one("select * from slide_review where file_id=?", fid)
+    # 断言用 app 的全局 db（端点写入方），与 env 的 db 在首个 import 时同源
+    import ppt_lite.app as appmod
+    adb = appmod.db
+    sr = adb.one("select * from slide_review where file_id=?", fid)
     assert sr["status"] == "approved" and sr["is_template"] == 1 and sr["tags"] == ",战略,宣讲,"
     # upsert 二次更新
     r = c.post(f"/api/slides/{sid}/review", data={"status": "reference"})
@@ -307,7 +310,7 @@ def test_review_endpoints(env):
     assert r.status_code == 200, r.text
     r = c.post("/api/media/m1/review", data={"status": "forbidden"})
     assert r.status_code == 200
-    assert db.one("select status from media_review where sha256='m1'")["status"] == "forbidden"
+    assert adb.one("select status from media_review where sha256='m1'")["status"] == "forbidden"
 
 
 # ------------------------------------------------------------------ 超时自适应
@@ -319,3 +322,43 @@ def test_lo_timeout_scaling(env):
     t_large = cfg.lo_timeout(pages=100, size_bytes=50 * 1024 * 1024)  # 100 页 50MB
     assert t_large > t_small > base
     assert cfg.lo_timeout(pages=10000, size_bytes=500 * 1024 * 1024) == cfg.lo_timeout_max_sec  # 封顶
+
+
+# ------------------------------------------------------------------ 规范 markdown 流程
+def test_design_markdown_flow(env):
+    """规范承载改为 markdown：导入（粘贴）→ 编辑 → 确认 → 导出 .md。
+    注意：app 模块级全局 db 在首次 import 时定型，断言必须用 appmod.db（与端点同源）。"""
+    from fastapi.testclient import TestClient
+    import ppt_lite.app as appmod
+    c = TestClient(appmod.app)
+    adb = appmod.db
+
+    # 粘贴导入
+    md = "# 品牌规范\n\n## 配色\n- 主色 #003A70\n- 禁用 #FF0000\n\n## 字体\n- 标题 MiSans 26pt 加粗\n"
+    r = c.post("/api/design/import", data={"content": md})
+    assert r.status_code == 200, r.text
+    v = r.json()["version"]
+    row = adb.one("select * from design_system where version=?", v)
+    assert row["status"] == "draft" and row["content_md"] == md.strip()
+
+    # 上传 .md 文件导入
+    r = c.post("/api/design/import", files={"file": ("spec.md", "# v2 规范\n字体规范…", "text/markdown")})
+    assert r.status_code == 200 and r.json()["version"] == v + 1
+
+    # 编辑草稿（markdown 路径）
+    did = row["id"]
+    r = c.post(f"/api/design/{did}/update", data={"content": md + "\n## 补充\n- 页脚必须\n"})
+    assert r.status_code == 200
+    assert "页脚必须" in adb.one("select content_md from design_system where id=?", did)["content_md"]
+
+    # 确认后冻结
+    r = c.post(f"/api/design/{did}/confirm")
+    assert r.status_code == 200
+    r = c.post(f"/api/design/{did}/update", data={"content": "改不动的"})
+    assert r.status_code == 409
+
+    # 导出 .md
+    r = c.get(f"/api/design/{did}/export")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert "design-spec-v" in r.headers["content-disposition"]

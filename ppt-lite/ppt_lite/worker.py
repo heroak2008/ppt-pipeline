@@ -10,7 +10,6 @@ from .config import Config
 from .db import Database
 from .pipeline import extract_document
 from .store import Store
-from .design_draft import maybe_generate
 
 log = logging.getLogger("pptlite.worker")
 
@@ -79,12 +78,13 @@ class Worker:
                             self.store.add_media_ref(sid, mid, occ["role"])
             # finalize（文件先发布→DB 后切换；幂等；LO 降级时跳过发布）
             self.store.finalize(ex_id, len(doc.slides), has_preview=doc.render_error is None)
-            # 规范数据源入库（主题色/字体/页面尺寸；design_draft 消费）
+            # 规范数据源入库（主题色/字体/页面尺寸；保留在 design_json 供参考）
             if doc.design:
                 with self.db.tx() as cur:
                     cur.execute("update extraction set design_json=? where id=?",
                                 (json.dumps(doc.design, ensure_ascii=False), ex_id))
-            maybe_generate(self.db, ex_id)
+            # 注：规范不再从 PPT 自动生成草稿——规范以 markdown 为承载，
+            # 由 skill/人工经「模板与规范」页导入（见 §4.9-lite 变更）
         except Exception as e:  # noqa: BLE001 — 任何异常 → 失败清理（旧 done 不动）
             log.exception("处理失败 ex=%s", ex_id)
             self.store.mark_failed(ex_id, str(e)[:500])
