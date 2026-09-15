@@ -438,7 +438,7 @@ limit 100;
 1. **文件列表**：状态徽标/错误/重跑（终态才可用）/删除（终态才可用）/编辑 category、note；failed-but-old-data 徽标。
 2. **页面墙 + 详情**：数据一律 v_active_slide；筛选（文件/类型/标签/审核状态）→ 详情（大图 + 文本 + 对象简表 + 媒体引用 + warnings + 重跑失败横幅如有）+ 审核表单（upsert slide_review）。
 3. **素材网格**：phash 聚簇；同 sha256 聚合；"被引用于"走 v_active_slide 反查；打标写 media_review。
-4. **模板与规范**：模板候选（slide_review.is_template=1 + template_json；缩略图+容量表单+来源页跳转）；规范草稿（自动 draft → 人工编辑 → 确认 → 导出 JSON）。
+4. **模板与规范**：模板候选（slide_review.is_template=1 + template_json；缩略图+容量表单+来源页跳转）；规范以 **markdown 承载**：skill/AI 生成 → 粘贴导入（或上传 .md）→ 编辑器人工修订 → 确认版本 → 导出 .md。**不再从 PPT 自动提取文字生成草稿**（design_json 仍保留主题实采数据供参考）。
 
 ## 7. ExtractedDocument 契约（迁移桥 + 内部接口）
 
