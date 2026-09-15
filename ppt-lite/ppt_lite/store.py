@@ -119,6 +119,47 @@ class Store:
             cur.execute("insert into slide_fts(rowid, title, body) values(?,?,?)",
                         (sid, s.get("title") or "", s.get("search_text") or ""))
 
+    # ---------- 素材目录导入（独立于 PPT 的素材入库） ----------
+    def import_media_file(self, data: bytes, ext: str) -> tuple[str, bool]:
+        """单个素材文件入库（内容寻址去重）。返回 (sha256, created)。
+
+        文件先发布（锁内）→ DB 后提交；已存在则复用（created=False，不重复写盘）。
+        """
+        import hashlib
+        sha = hashlib.sha256(data).hexdigest()
+        fmt = ext.lstrip(".").lower()
+        path = f"media/{sha}.{fmt}"
+        canonical = Path(self.cfg.data_dir) / path
+
+        w = h = None
+        phash = None
+        if fmt in {"png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "ico"}:
+            try:
+                import io as _io
+                import imagehash as _ih
+                from PIL import Image as _Image
+                img = _Image.open(_io.BytesIO(data))
+                w, h = img.size
+                phash = str(_ih.phash(img))
+            except Exception:  # noqa: BLE001
+                pass
+        # svg/emf/wmf：浏览器可直接渲染 svg（preview=path）；emf/wmf 暂无预览（占位）
+        preview = path if fmt == "svg" else None
+
+        existing = self.db.one("select id from media where sha256=?", sha)
+        if existing:
+            return sha, False
+        with fslock:
+            if not canonical.exists():
+                canonical.parent.mkdir(parents=True, exist_ok=True)
+                canonical.write_bytes(data)
+            with self.db.tx(busy="short") as cur:
+                cur.execute(
+                    "insert into media(sha256, fmt, w, h, phash, path, preview) values(?,?,?,?,?,?,?)"
+                    " on conflict(sha256) do nothing",
+                    (sha, fmt, w, h, phash, path, preview))
+        return sha, True
+
     def upsert_media(self, sha: str, fmt: str, w, h, phash, path: str, preview, staging_file: Path) -> int:
         """媒体落盘（§4.3 铁律⑤：文件先发布→DB 后提交；锁内）。返回 media_id。"""
         canonical = Path(self.cfg.data_dir) / path

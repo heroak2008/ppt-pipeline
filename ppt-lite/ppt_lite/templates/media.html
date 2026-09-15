@@ -4,6 +4,13 @@
 {% block topbar %}
   <h1>素材库</h1>
   <div class="sp"></div>
+  <form id="import-media" class="row" style="gap:8px">
+    <input type="file" id="mdir" webkitdirectory multiple style="display:none">
+    <input type="file" id="mfiles" multiple accept=".png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp,.ico,.svg,.emf,.wmf" style="display:none">
+    <button type="button" class="btn" onclick="document.getElementById('mdir').click()">导入素材目录</button>
+    <button type="button" class="btn" onclick="document.getElementById('mfiles').click()">导入素材文件</button>
+    <span id="imp-status" class="muted"></span>
+  </form>
   <span class="muted">{{ rows|length }} 个素材 · 按被引用数排序</span>
 {% endblock %}
 {% block content %}
@@ -49,5 +56,25 @@ async function rev(sha, status, btn) {
   const {ok} = await parseResp(r);
   if (ok) { flashBar(); location.reload(); } else { toast('保存失败', false); btn.disabled = false; }
 }
+
+// 目录/多文件导入
+async function importMedia(input) {
+  if (!input.files.length) return;
+  const st = document.getElementById('imp-status');
+  st.textContent = `导入中（${input.files.length} 个文件）…`; setBar(30);
+  const fd = new FormData();
+  for (const f of input.files) fd.append('files', f, f.webkitRelativePath || f.name);
+  const r = await fetch('/api/media/import', {method:'POST', body: fd});
+  const {ok, j, txt} = await parseResp(r);
+  flashBar();
+  if (ok) {
+    toast(`导入完成：新增 ${j.imported}，重复跳过 ${j.skipped_dup}，不支持的类型 ${j.skipped_type}`
+          + (j.errors && j.errors.length ? `，${j.errors.length} 个失败` : ''));
+    setTimeout(() => location.reload(), 800);
+  } else { toast('导入失败：' + ((j && j.detail) || txt.slice(0,120)), false); st.textContent=''; }
+  input.value = '';
+}
+document.getElementById('mdir').onchange = e => importMedia(e.target);
+document.getElementById('mfiles').onchange = e => importMedia(e.target);
 </script>
 {% endblock %}

@@ -310,6 +310,38 @@ def api_design_confirm(did: int, confirmed_by: str = Form("")):
     return {"ok": True}
 
 
+# 素材目录导入允许的扩展名
+MEDIA_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp", ".ico",
+                     ".svg", ".emf", ".wmf"}
+
+
+@app.post("/api/media/import")
+async def api_media_import(files: list[UploadFile] = File(...)):
+    """素材目录导入：浏览器选整个文件夹（webkitdirectory）批量上传，按内容寻址去重。"""
+    imported = skipped_dup = skipped_type = 0
+    errors: list[str] = []
+    for f in files:
+        name = f.filename or ""
+        ext = Path(name).suffix.lower()
+        if ext not in MEDIA_IMPORT_EXTS:
+            skipped_type += 1
+            continue
+        data = await f.read()
+        if len(data) > cfg.max_media_bytes:
+            errors.append(f"{name}：超大小上限")
+            continue
+        try:
+            sha, created = await run_in_threadpool(store.import_media_file, data, ext)
+            if created:
+                imported += 1
+            else:
+                skipped_dup += 1
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{name}：{e}")
+    return {"ok": True, "imported": imported, "skipped_dup": skipped_dup,
+            "skipped_type": skipped_type, "errors": errors[:10]}
+
+
 @app.post("/api/design/import")
 async def api_design_import(content: str = Form(""), file: UploadFile | None = File(None)):
     """导入规范（markdown）：粘贴文本 或 上传 .md 文件 → 新 draft 版本。"""

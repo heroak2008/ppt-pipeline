@@ -374,3 +374,41 @@ def test_design_markdown_flow(env):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/markdown")
     assert "design-spec-v" in r.headers["content-disposition"]
+
+
+# ------------------------------------------------------------------ 素材目录导入
+def test_media_import(env):
+    """归档素材目录导入：PNG（提取尺寸/phash）+ SVG（preview=自身）+ 重复去重 + 类型过滤。
+    注意：store/db 与 app 全局同源（模块首次 import 时定型），断言统一走 appmod。"""
+    from fastapi.testclient import TestClient
+    import ppt_lite.app as appmod
+    store = appmod.store
+    adb = appmod.db
+    png = _png_bytes()
+    sha, created = store.import_media_file(png, "png")
+    assert created
+    m = adb.one("select * from media where sha256=?", sha)
+    assert m["fmt"] == "png" and m["w"] == 8 and m["phash"]
+    assert (appmod.cfg.data_dir / m["path"]).exists()
+
+    # svg：preview 指向自身
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#C05621"/></svg>'
+    sha2, created2 = store.import_media_file(svg, "svg")
+    assert created2
+    m2 = adb.one("select * from media where sha256=?", sha2)
+    assert m2["preview"] == m2["path"] == f"media/{sha2}.svg"
+
+    # 重复导入去重
+    sha3, created3 = store.import_media_file(png, "png")
+    assert sha3 == sha and not created3
+
+    # API 路径（含类型过滤）
+    c = TestClient(appmod.app)
+    r = c.post("/api/media/import", files=[
+        ("files", ("a.png", png, "image/png")),
+        ("files", ("b.svg", svg, "image/svg+xml")),
+        ("files", ("c.txt", b"nope", "text/plain")),
+    ])
+    assert r.status_code == 200
+    j = r.json()
+    assert j["skipped_dup"] == 2 and j["skipped_type"] == 1 and j["imported"] == 0
