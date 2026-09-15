@@ -345,6 +345,18 @@ def test_design_markdown_flow(env):
     r = c.post("/api/design/import", files={"file": ("spec.md", "# v2 规范\n字体规范…", "text/markdown")})
     assert r.status_code == 200 and r.json()["version"] == v + 1
 
+    # 材料类型（file.doc_type）：上传携带 + 后续可改
+    import tempfile, pathlib
+    r2 = c.post("/api/upload",
+                files={"file": ("x.pptx", make_pptx(pathlib.Path(tempfile.mkdtemp()) / "dt.pptx", 1), "application/octet-stream")},
+                data={"category": "sample", "doc_type": "洞察材料"})
+    assert r2.status_code == 200, r2.text
+    fid = r2.json()["file_id"]
+    assert adb.one("select doc_type from file where id=?", fid)["doc_type"] == "洞察材料"
+    r3 = c.post(f"/api/files/{fid}/attrs", data={"doc_type": "BP材料"})
+    assert r3.status_code == 200
+    assert adb.one("select doc_type from file where id=?", fid)["doc_type"] == "BP材料"
+
     # 编辑草稿（markdown 路径）
     did = row["id"]
     r = c.post(f"/api/design/{did}/update", data={"content": md + "\n## 补充\n- 页脚必须\n"})

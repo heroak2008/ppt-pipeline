@@ -17,6 +17,10 @@
       <select name="category">
         <option value="material">素材</option><option value="spec">规范</option><option value="sample">范例</option>
       </select>
+      <input type="text" name="doc_type" list="doc-types" placeholder="材料类型（洞察/立项/BP…）" style="width:180px">
+      <datalist id="doc-types">
+        {% for t in doc_types %}<option value="{{ t }}">{% endfor %}
+      </datalist>
       <button type="submit" class="btn primary" id="upbtn">上传</button>
       <span id="upstatus" class="muted"></span>
     </form>
@@ -28,6 +32,7 @@
     <table class="tbl" id="ftable">
       <thead><tr>
         <th style="width:56px">ID</th><th>名称</th><th style="width:90px">类别</th>
+        <th style="width:110px">材料类型</th>
         <th style="width:130px">状态</th><th style="width:80px">生效页数</th>
         <th style="width:240px">错误</th><th style="width:150px">操作</th>
       </tr></thead>
@@ -37,6 +42,9 @@
         <td class="num c-id">{{ f.id }}</td>
         <td class="fname c-name">{{ f.name }}</td>
         <td class="c-cat"><span class="pill">{{ {'material':'素材','spec':'规范','sample':'范例'}.get(f.category, f.category) }}</span></td>
+        <td class="c-doctype" title="双击修改材料类型" ondblclick="editDocType({{ f.id }}, this)">
+          {% if f.doc_type %}<span class="pill" style="background:#FFF3E0;color:#A05A00">{{ f.doc_type }}</span>{% else %}<span class="muted">—</span>{% endif %}
+        </td>
         <td class="c-status"><span class="badge {{ f.status }}">{{ f.status }}</span>
           {% if f.status=='failed' and f.has_done %}<span class="badge reference" title="重跑失败，仍展示旧数据">旧数据生效</span>{% endif %}</td>
         <td class="num c-count">{{ f.slide_count }}</td>
@@ -47,7 +55,7 @@
         </td>
       </tr>
       {% endfor %}
-      {% if not files %}<tr><td colspan="7"><div class="empty" style="border:0;box-shadow:none">
+      {% if not files %}<tr><td colspan="8"><div class="empty" style="border:0;box-shadow:none">
         <div class="big">还没有文件</div>上传素材 / 规范 / 范例 PPT 开始构建资产库
       </div></td></tr>{% endif %}
       </tbody>
@@ -85,6 +93,17 @@ async function action(url, btn) {
   toast(ok ? '已执行' : ('失败：' + ((j && j.detail) || r.status)), ok);
   await refreshTable();
   btn.disabled = false;
+}
+
+async function editDocType(fid, cell) {
+  const current = cell.textContent.trim() === '—' ? '' : cell.textContent.trim();
+  const v = prompt('材料类型（如：洞察材料/立项材料/BP材料，可自由输入）：', current);
+  if (v === null) return;
+  const body = new FormData(); body.set('doc_type', v);
+  const r = await fetch('/api/files/' + fid + '/attrs', {method:'POST', body});
+  const {ok} = await parseResp(r);
+  if (ok) { cell.innerHTML = v.trim() ? `<span class="pill" style="background:#FFF3E0;color:#A05A00">${v.trim()}</span>` : '<span class="muted">—</span>'; flashBar(); }
+  else toast('保存失败', false);
 }
 
 let timer = null;

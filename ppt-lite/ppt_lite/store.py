@@ -28,7 +28,8 @@ class Store:
     # ---------- §4.1 上传登记（锁内一气呵成：文件先发布→DB 后提交） ----------
     def register_upload(self, sha: str, name: str, category: str,
                         raw_rel: str, derived_rel: str | None,
-                        raw_src: Path, derived_src: Path | None) -> tuple[int, bool]:
+                        raw_src: Path, derived_src: Path | None,
+                        doc_type: str | None = None) -> tuple[int, bool]:
         """§4.1 锁内：发布 raw/derived（文件先）→ 单事务登记 file+extraction（后）。
         返回 (file_id, created)。sha 已存在 → 复用不建任务。
         重试耗尽/非重试异常的补偿（§4.1 ※）：锁内复查 DB 无该 sha 行 → 已发布文件进 trash。
@@ -54,9 +55,9 @@ class Store:
                             result["fid"], result["created"] = row["id"], False
                         else:
                             cur.execute(
-                                "insert into file(sha256, name, category, status, raw_path, derived_path)"
-                                " values(?,?,?,?,?,?)",
-                                (sha, name, category, "queued", raw_rel, derived_rel))
+                                "insert into file(sha256, name, category, status, raw_path, derived_path, doc_type)"
+                                " values(?,?,?,?,?,?,?)",
+                                (sha, name, category, "queued", raw_rel, derived_rel, doc_type or None))
                             fid = cur.lastrowid
                             cur.execute(
                                 "insert into extraction(file_id, status, parser_version) values(?,?,?)",

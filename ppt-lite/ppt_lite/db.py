@@ -38,6 +38,7 @@ create table if not exists file (
   error text,
   raw_path text not null,
   derived_path text,
+  doc_type text,                        -- 业务类型：洞察材料/立项材料/BP材料/…（自由值，常用项下拉）
   note text,
   created_at text default (datetime('now'))
 );
@@ -185,6 +186,9 @@ class Database:
             cols = {r[1] for r in conn.execute("pragma table_info(design_system)")}
             if "content_md" not in cols:
                 conn.execute("alter table design_system add column content_md text")
+            cols = {r[1] for r in conn.execute("pragma table_info(file)")}
+            if "doc_type" not in cols:
+                conn.execute("alter table file add column doc_type text")
         finally:
             conn.close()
 

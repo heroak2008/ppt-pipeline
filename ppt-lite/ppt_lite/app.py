@@ -64,7 +64,8 @@ def page_files(request: Request, category: str | None = None):
     files = [dict(r) for r in _file_rows(category)]
     return templates.TemplateResponse(request, "files.html",
                                       {"request": request, "files": files, "category": category,
-                                       "soffice": bool(cfg.soffice), "footer_info": _footer()})
+                                       "soffice": bool(cfg.soffice), "footer_info": _footer(),
+                                       "doc_types": DOC_TYPES})
 
 
 def _file_rows(category: str | None = None) -> list:
@@ -173,11 +174,17 @@ def page_design(request: Request):
 
 
 # ---------------------------------------------------------------- API
+# 常用业务类型（自由值，下拉仅做快捷项；文件列表可改）
+DOC_TYPES = ["洞察材料", "立项材料", "BP材料", "方案汇报", "总结复盘", "产品介绍", "其他"]
+
+
 @app.post("/api/upload")
 async def api_upload(background_tasks: BackgroundTasks,
-                     file: UploadFile = File(...), category: str = Form(...)):
+                     file: UploadFile = File(...), category: str = Form(...),
+                     doc_type: str = Form("")):
     if category not in ("material", "spec", "sample"):
         raise HTTPException(422, "category 必须是 material/spec/sample")
+    doc_type = doc_type.strip() or None
     data = await file.read()
     if len(data) > cfg.max_upload_bytes:
         raise HTTPException(413, "文件过大")
@@ -220,12 +227,25 @@ async def api_upload(background_tasks: BackgroundTasks,
     try:
         fid, created = await run_in_threadpool(
             store.register_upload, sha, name, category, raw_rel, derived_rel,
-            raw_src, derived_src)
+            raw_src, derived_src, doc_type)
     except PrecheckError as e:
         raise HTTPException(422, e.reason)
     worker.wake()
     return {"file_id": fid, "created": created,
             "message": None if created else "同内容文件已存在，复用既有记录"}
+
+
+@app.post("/api/files/{fid}/attrs")
+def api_file_attrs(fid: int, doc_type: str = Form(None), note: str = Form(None)):
+    """改文件属性（材料类型/备注）——人工属性，重跑不覆盖。"""
+    f = db.one("select id from file where id=?", fid)
+    if not f:
+        raise HTTPException(404)
+    with db.tx() as cur:
+        cur.execute("update file set doc_type=coalesce(?, doc_type), note=coalesce(?, note) where id=?",
+                    (doc_type.strip() if doc_type is not None else None,
+                     note if note is not None else None, fid))
+    return {"ok": True}
 
 
 @app.post("/api/files/{fid}/reprocess")
